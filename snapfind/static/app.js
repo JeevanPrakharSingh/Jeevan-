@@ -19,10 +19,10 @@ async function api(path, options) {
   try {
     response = await fetch(path, options);
   } catch {
-    throw new Error("Connection interrupted. Retry the failed photos.");
+    throw Object.assign(new Error("Connection interrupted. Retry the failed photos."), {retryable:true});
   }
   if ([502, 503, 504].includes(response.status) && !response.headers.get("content-type")?.includes("application/json")) {
-    throw new Error("Server temporarily unavailable. Retry the failed photos.");
+    throw Object.assign(new Error("Server temporarily unavailable. Retry the failed photos."), {retryable:true});
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "Request failed. Please try again.");
@@ -312,8 +312,30 @@ el("copyLink").addEventListener("click", async () => {
   el("selection").textContent = selected.length ? selected.length + " photos · " + size : "No supported photos selected.";
   el("upload").textContent = "Upload and index photos";
   el("upload").disabled = !active || !selected.length || uploading;
-  event.target.value = "";
 }));
+
+async function uploadPhoto(destination, file, onRetry) {
+  if (file.size > 50 * 1024 * 1024) throw new Error("Each photo must be 50 MiB or smaller.");
+  let bytes;
+  try {
+    bytes = await file.arrayBuffer();
+  } catch {
+    throw new Error("This browser could not read the selected photo. Save a local copy and select it again in Chrome or Safari.");
+  }
+  // Detach the request body from the mobile photo picker's file handle.
+  const photo = new Blob([bytes], {type:file.type || "application/octet-stream"});
+  const body = new FormData();
+  body.append("photo", photo, file.name);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await api(eventPath(destination) + "/photos", {method:"POST", body});
+    } catch (error) {
+      if (!error.retryable || attempt >= 2) throw error;
+      onRetry(attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 1500));
+    }
+  }
+}
 
 el("upload").addEventListener("click", async () => {
   if (!active || !selected.length || uploading) return;
@@ -331,10 +353,10 @@ el("upload").addEventListener("click", async () => {
   el("failures").replaceChildren();
   for (const [index, file] of files.entries()) {
     el("uploadStatus").textContent = "Processing " + (index + 1) + "/" + files.length + " · " + file.name;
-    const body = new FormData();
-    body.append("photo", file);
     try {
-      const result = await api(eventPath(destination) + "/photos", {method:"POST", body});
+      const result = await uploadPhoto(destination, file, (retry) => {
+        el("uploadStatus").textContent = "Retrying " + file.name + " · attempt " + (retry + 1) + "/3";
+      });
       if (result.duplicate) duplicates++;
       else {
         uploaded++;
