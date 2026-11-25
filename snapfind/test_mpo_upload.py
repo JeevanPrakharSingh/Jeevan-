@@ -34,7 +34,7 @@ def test_mpo_upload():
             assert photo["name"] == "DSC_5558.JPG"
         with Image.open(DATA / photo["id"]) as saved:
             assert saved.format == "JPEG" and getattr(saved, "n_frames", 1) == 1
-            assert saved.width == 4096 and 2700 < saved.height < 2750
+            assert saved.size == (1500, 1000)
             red, _, blue = saved.getpixel((160, 110))
             assert red > 240 and blue < 15
         print("MPO regression passed: camera .JPG indexed, primary JPEG stored, duplicate skipped", flush=True)

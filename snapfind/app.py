@@ -116,8 +116,8 @@ def extract(stream):
 
 def index_image(original):
     global engine
-    original.draft("RGB", (1600, 1600))
-    original.thumbnail((1600, 1600))
+    original.draft("RGB", (1024, 1024))
+    original.thumbnail((1024, 1024))
     ImageOps.exif_transpose(original, in_place=True)
     pixels = cv2.cvtColor(np.asarray(original.convert("RGB")), cv2.COLOR_RGB2BGR)
     with engine_lock:
@@ -247,8 +247,11 @@ def upload(eid):
             is_mpo = original.format == "MPO"
             if is_mpo:
                 original.seek(0)
-                original.draft("RGB", (4096, 4096))
-                original.thumbnail((4096, 4096))
+                width, height = original.size
+                divisor = next((n for n in (1, 2, 4, 8) if max(width, height) <= 2048 * n), 8)
+                if divisor > 1:
+                    original.draft("RGB", (max(1, width // divisor), max(1, height // divisor)))
+                original.thumbnail((2048, 2048))
                 ImageOps.exif_transpose(original, in_place=True)
                 # Only distribute the primary image. Other MPO frames are not face-indexed.
                 original.save(path, "JPEG", quality=95)
