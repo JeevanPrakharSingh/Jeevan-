@@ -36,9 +36,9 @@ def blink_states(frames):
                 continue
             scores = {item.category_name: item.score for item in result.face_blendshapes[0]}
             eyes = scores["eyeBlinkLeft"], scores["eyeBlinkRight"]
-            if min(eyes) >= 0.57:
+            if min(eyes) >= 0.50:
                 yield "closed"
-            elif max(eyes) <= 0.32:
+            elif max(eyes) <= 0.37:
                 yield "open"
             else:
                 yield "transition"

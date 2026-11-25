@@ -65,6 +65,7 @@ el("openCamera").addEventListener("click", async () => {
     return;
   }
   const run = ++cameraRun;
+  prepareBlinkModel();
   el("openCamera").disabled = true;
   el("cancelCamera").hidden = false;
   el("results").hidden = true;
@@ -88,7 +89,9 @@ el("openCamera").addEventListener("click", async () => {
     el("frame").hidden = true;
     el("openCamera").hidden = true;
     el("status").textContent = "Look at the camera and blink once.";
-    await watchForBlink(run, ticket);
+    if (!await captureLocalBlink(run, ticket) && run === cameraRun) {
+      await watchForBlink(run, ticket);
+    }
   } catch (error) {
     if (run !== cameraRun) return;
     stopCamera();
@@ -121,7 +124,78 @@ function frameFromCamera(maxSize = 960, quality = 0.9) {
   }, "image/jpeg", quality));
 }
 
+const visionUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
+let blinkModel;
+function prepareBlinkModel() {
+  if (!blinkModel) {
+    blinkModel = import(visionUrl + "/vision_bundle.mjs").then(async ({FaceLandmarker, FilesetResolver}) => {
+      const files = await FilesetResolver.forVisionTasks(visionUrl + "/wasm");
+      return FaceLandmarker.createFromOptions(files, {
+        baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"},
+        runningMode:"VIDEO", numFaces:1, outputFaceBlendshapes:true
+      });
+    }).catch(() => null);
+  }
+  return blinkModel;
+}
+
+async function captureLocalBlink(run, ticket) {
+  el("status").textContent = "Getting the camera ready…";
+  const model = await Promise.race([prepareBlinkModel(), new Promise(resolve => setTimeout(() => resolve(null), 2300))]);
+  if (!model || run !== cameraRun) return false;
+  const video = el("video");
+  let before, closed, lastVideoTime = -1;
+  const deadline = performance.now() + 16000;
+  el("status").textContent = "Look at the camera and blink once.";
+  while (run === cameraRun && performance.now() < deadline) {
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    if (run !== cameraRun) return true;
+    if (video.currentTime === lastVideoTime) continue;
+    lastVideoTime = video.currentTime;
+    const now = performance.now();
+    let categories;
+    try {
+      categories = model.detectForVideo(video, now).faceBlendshapes[0]?.categories;
+    } catch {
+      return false;
+    }
+    if (!categories) {
+      before = closed = null;
+      continue;
+    }
+    const left = categories.find(item => item.categoryName === "eyeBlinkLeft")?.score;
+    const right = categories.find(item => item.categoryName === "eyeBlinkRight")?.score;
+    if (Math.max(left, right) <= 0.30) {
+      const after = frameFromCamera(400, 0.76);
+      if (closed && now - closed.time < 650) {
+        const body = new FormData();
+        for (const frame of await Promise.all([before.frame, closed.frame, after])) {
+          body.append("blink", frame, "blink.jpg");
+        }
+        if (run !== cameraRun) return true;
+        body.append("consent", el("consent").checked ? "yes" : "no");
+        body.append("challenge", ticket.challenge);
+        el("status").textContent = "Blink captured. Finding your photos…";
+        const result = await api(eventPath(eid) + "/search", {method:"POST", body});
+        if (run !== cameraRun) return true;
+        if (!result.waiting) {
+          stopCamera();
+          renderResults(result);
+          return true;
+        }
+        el("status").textContent = "Keep your face centered and blink once.";
+      }
+      before = {frame:after, time:now};
+      closed = null;
+    } else if (!closed && before && now - before.time < 500 && Math.min(left, right) >= 0.64) {
+      closed = {frame:frameFromCamera(400, 0.76), time:now};
+    }
+  }
+  return false;
+}
+
 async function watchForBlink(run, ticket) {
+  el("status").textContent = "Look at the camera and blink once.";
   const buffer = [];
   const deadline = performance.now() + 24000;
   let pending = null;

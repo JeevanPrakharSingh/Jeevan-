@@ -5,15 +5,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>SnapFind AI · Event photo gallery</title>
-<link rel="stylesheet" href="/static/app.css">
-<script src="/static/app.js?v=blink-once" defer></script>
+<link rel="stylesheet" href="/static/app.css?v=studio">
+<script src="/static/app.js?v=studio" defer></script>
 </head>
 <body data-event="{{ event }}" data-admin="{{ 'yes' if admin else 'no' }}">
 <header><a class="brand" href="/"><span aria-hidden="true">◎</span> SnapFind<span class="accent"> AI</span></a><button type="button" id="switch" class="secondary">Organizer dashboard</button></header>
 <main>
 <section id="guest">
   <div class="hero">
-    <div class="intro"><span class="eyebrow">EVENT PHOTO GALLERY</span><h1>Find your<br>event photos.</h1><p>Take a live selfie to find your photos, then download your favorites or save every match in one ZIP.</p><p class="event-label" id="eventName" role="status">Open the event link from your organizer.</p></div>
+    <div class="intro"><span class="eyebrow">GUEST GALLERY</span><h1>Find your<br>event photos.</h1><p>Take a live selfie to find your photos, then download your favorites or save every match in one ZIP.</p><p class="event-label" id="eventName" role="status">Open the event link from your organizer.</p></div>
     <div class="card camera-card">
       <h2>Live selfie</h2>
       <div class="camera"><div id="frame"><div class="oval" aria-hidden="true"></div><span>Center your face in the frame</span></div><video id="video" autoplay playsinline muted hidden></video></div>

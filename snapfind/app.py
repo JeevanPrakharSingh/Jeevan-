@@ -122,7 +122,7 @@ def index_image(original):
     pixels = cv2.cvtColor(np.asarray(original.convert("RGB")), cv2.COLOR_RGB2BGR)
     with engine_lock:
         if engine is None:
-            detector = cv2.FaceDetectorYN.create(str(MODELS[0]), "", (320, 320), 0.9, 0.3, 5000)
+            detector = cv2.FaceDetectorYN.create(str(MODELS[0]), "", (320, 320), 0.84, 0.3, 5000)
             recognizer = cv2.FaceRecognizerSF.create(str(MODELS[1]), "")
             engine = detector, recognizer
         detector, recognizer = engine
@@ -131,7 +131,7 @@ def index_image(original):
         result = []
         if faces is not None:
             for face in faces:
-                if min(face[2:4]) < 30:
+                if min(face[2:4]) < 20:
                     continue
                 vector = recognizer.feature(recognizer.alignCrop(pixels, face)).flatten().astype("float32")
                 vector /= max(float(np.linalg.norm(vector)), 1e-8)
@@ -329,7 +329,7 @@ def search(eid):
     if limited("blink:" + ticket, 20, 120):
         abort(429, "No blink was verified. Restart the camera and try again.")
     burst = request.files.getlist("blink")
-    if len(burst) != FRAME_COUNT or not LIVENESS_MODEL.is_file():
+    if len(burst) not in (3, FRAME_COUNT) or not LIVENESS_MODEL.is_file():
         abort(422, LIVENESS_ERROR)
     frames = [item.stream.read(MAX_FRAME_BYTES + 1) for item in burst]
     if any(not frame or len(frame) > MAX_FRAME_BYTES for frame in frames):
@@ -363,7 +363,7 @@ def search(eid):
         for row in rows:
             vector = np.frombuffer(row["embedding"], dtype="float32")
             scores = (np.dot(before, vector), np.dot(after, vector))
-            if min(scores) >= 0.52 and sum(scores) / 2 >= 0.58:
+            if (max(scores) >= 0.62 and min(scores) >= 0.48) or min(scores) >= 0.56:
                 found[row["id"]] = row["name"]
         conn.execute("DELETE FROM grants WHERE token IN (SELECT token FROM tickets WHERE expires<=?)", (now,))
         conn.execute("DELETE FROM tickets WHERE expires<=?", (now,))
@@ -395,8 +395,9 @@ def photo(token, pid):
     download = request.args.get("download") == "1"
     with Image.open(path) as image:
         mimetype = PHOTO_FORMATS[image.format][0]
-        if not download and image.format not in ("JPEG", "PNG", "WEBP"):
-            image.thumbnail((1000, 1000))
+        if not download:
+            image.draft("RGB", (840, 840))
+            image.thumbnail((840, 840))
             ImageOps.exif_transpose(image, in_place=True)
             output = io.BytesIO()
             image.convert("RGB").save(output, "JPEG", quality=85)
