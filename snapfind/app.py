@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 from flask import Flask, abort, jsonify, render_template, request, send_file, session
 from PIL import Image, ImageOps
+from pillow_heif import register_heif_opener
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
@@ -28,6 +29,17 @@ MODELS = [BASE / "models" / name for name in (
     "face_detection_yunet_2023mar.onnx", "face_recognition_sface_2021dec.onnx",
 )]
 LIMIT = 50 * 1024 * 1024
+PHOTO_FORMATS = {
+    "JPEG": ("image/jpeg", (".jpg", ".jpeg", ".jfif")),
+    "PNG": ("image/png", (".png",)),
+    "WEBP": ("image/webp", (".webp",)),
+    "HEIF": ("image/heif", (".heic", ".heif")),
+    "AVIF": ("image/avif", (".avif",)),
+    "TIFF": ("image/tiff", (".tif", ".tiff")),
+    "BMP": ("image/bmp", (".bmp",)),
+    "GIF": ("image/gif", (".gif",)),
+}
+register_heif_opener(thumbnails=False)
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 app.config.update(MAX_CONTENT_LENGTH=LIMIT + 1024 * 1024, SESSION_COOKIE_SAMESITE="Lax",
@@ -93,14 +105,17 @@ def private_response(response):
 
 
 def extract(stream):
-    global engine
     with Image.open(stream) as original:
-        mime = Image.MIME.get(original.format)
-        if mime not in ("image/jpeg", "image/png", "image/webp"):
-            raise ValueError("Use a JPG, PNG or WebP image.")
-        image = ImageOps.exif_transpose(original)
-        image.thumbnail((2560, 2560))
-        pixels = cv2.cvtColor(np.asarray(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+        if original.format not in ("JPEG", "PNG", "WEBP"):
+            raise ValueError("Unsupported camera frame")
+        return index_image(original)
+
+
+def index_image(original):
+    global engine
+    original.thumbnail((2560, 2560))
+    ImageOps.exif_transpose(original, in_place=True)
+    pixels = cv2.cvtColor(np.asarray(original.convert("RGB")), cv2.COLOR_RGB2BGR)
     with engine_lock:
         if engine is None:
             detector = cv2.FaceDetectorYN.create(str(MODELS[0]), "", (320, 320), 0.9, 0.3, 5000)
@@ -218,7 +233,14 @@ def upload(eid):
     name = (secure_filename(photo.filename) or "photo.jpg")[-180:]
     path = DATA / pid
     try:
-        vectors = extract(photo.stream)
+        with Image.open(photo.stream) as original:
+            if original.format not in PHOTO_FORMATS:
+                abort(415, f"{original.format} images are unsupported. Use JPG, PNG, WebP, HEIC, AVIF, TIFF, BMP or GIF.")
+            _, extensions = PHOTO_FORMATS[original.format]
+            suffix = Path(name).suffix.lower()
+            if suffix not in extensions:
+                name = (Path(name).stem or "photo") + extensions[0]
+            vectors = index_image(original)
         photo.stream.seek(0)
         photo.save(path)
         with db() as conn:
@@ -228,10 +250,14 @@ def upload(eid):
                 return jsonify(duplicate=True)
             conn.execute("INSERT INTO photos VALUES (?,?,?)", (pid, eid, name))
             conn.executemany("INSERT INTO faces VALUES (?,?)", [(pid, v.tobytes()) for v, _ in vectors])
-    except (OSError, ValueError, cv2.error, Image.DecompressionBombError):
+    except (OSError, ValueError, Image.DecompressionBombError):
         path.unlink(missing_ok=True)
-        app.logger.exception("Photo could not be indexed")
-        abort(422, "This photo could not be indexed. Check the image format and server setup.")
+        app.logger.exception("Photo could not be read or saved")
+        abort(422, "This image could not be opened or saved. Try exporting it as a new JPG.")
+    except cv2.error:
+        path.unlink(missing_ok=True)
+        app.logger.exception("Face indexing failed")
+        abort(503, "The face indexer could not process this photo. Try again shortly.")
     except Exception:
         path.unlink(missing_ok=True)
         raise
@@ -348,10 +374,18 @@ def photo(token, pid):
     if not rows:
         abort(404)
     path = DATA / pid
+    download = request.args.get("download") == "1"
     with Image.open(path) as image:
-        mimetype = Image.MIME[image.format]
+        mimetype = PHOTO_FORMATS[image.format][0]
+        if not download and image.format not in ("JPEG", "PNG", "WEBP"):
+            image.thumbnail((1000, 1000))
+            ImageOps.exif_transpose(image, in_place=True)
+            output = io.BytesIO()
+            image.convert("RGB").save(output, "JPEG", quality=85)
+            output.seek(0)
+            return send_file(output, mimetype="image/jpeg")
     return send_file(path, download_name=rows[0]["name"], mimetype=mimetype,
-                     as_attachment=request.args.get("download") == "1")
+                     as_attachment=download)
 
 
 @app.post("/result/<token>/zip")

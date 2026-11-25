@@ -34,7 +34,7 @@ docker run -d --name snapfind -p 127.0.0.1:8080:8080 \
 
 ## Uploads and access
 
-- Use JPG, PNG or WebP originals up to 50 MiB each. An album can total 5 GB or more if the host has capacity. Keep the upload tab open. For interruptions, choose the folder again in the same event. Previously uploaded files in this version are skipped by content hash.
+- Use JPG, PNG, WebP, HEIC, AVIF, TIFF, BMP or GIF originals up to 50 MiB each. An album can total 5 GB or more if the host has capacity. Keep the upload tab open. For interruptions, choose the folder again in the same event. Previously uploaded files in this version are skipped by content hash.
 - Photos are indexed as they arrive, so finish your upload before sharing the event link. The files are stored on the host and never made available as a public folder.
 - The guest page only offers live camera capture. A short-lived, one-use server challenge requires a random blink count, a head turn and a consistent face. Showing a still photo on another phone will fail the blink check. This active check cannot guarantee rejection of every prerecorded video, manipulated image sequence or virtual camera; use independently verified identity and a production-grade presentation-attack detector for sensitive galleries.
 - Matching is approximate. Poor lighting, small faces and similar-looking people can affect results. Download access belongs to the browser session that completed matching and expires after one hour. Previously shared result URLs from the original project are invalidated by the session requirement.
