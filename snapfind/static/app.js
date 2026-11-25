@@ -15,7 +15,15 @@ let selected = [];
 let uploading = false;
 
 async function api(path, options) {
-  const response = await fetch(path, options);
+  let response;
+  try {
+    response = await fetch(path, options);
+  } catch {
+    throw new Error("Connection interrupted. Retry the failed photos.");
+  }
+  if ([502, 503, 504].includes(response.status) && !response.headers.get("content-type")?.includes("application/json")) {
+    throw new Error("Server temporarily unavailable. Retry the failed photos.");
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "Request failed. Please try again.");
   return data;

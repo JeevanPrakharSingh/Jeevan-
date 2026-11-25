@@ -9,7 +9,7 @@ COPY static static
 RUN python setup_models.py && useradd --system snapfind && mkdir /data && chown snapfind /data
 RUN --mount=type=bind,source=test_mpo_upload.py,target=/app/test_mpo_upload.py \
     OPENBLAS_NUM_THREADS=1 python test_mpo_upload.py
-ENV SNAPFIND_DATA=/data PORT=8080
+ENV SNAPFIND_DATA=/data PORT=8080 MPLCONFIGDIR=/tmp/matplotlib
 USER snapfind
 EXPOSE 8080
 CMD ["sh", "-c", "exec waitress-serve --listen=0.0.0.0:$PORT --threads=6 app:app"]

@@ -47,6 +47,8 @@ app.config.update(MAX_CONTENT_LENGTH=LIMIT + 1024 * 1024, SESSION_COOKIE_SAMESIT
                   SESSION_COOKIE_SECURE=os.environ.get("SNAPFIND_HTTPS") == "1")
 engine = None
 engine_lock = threading.Lock()
+upload_lock = threading.Lock()
+cv2.setNumThreads(1)
 
 
 @contextmanager
@@ -114,7 +116,8 @@ def extract(stream):
 
 def index_image(original):
     global engine
-    original.thumbnail((2560, 2560))
+    original.draft("RGB", (1600, 1600))
+    original.thumbnail((1600, 1600))
     ImageOps.exif_transpose(original, in_place=True)
     pixels = cv2.cvtColor(np.asarray(original.convert("RGB")), cv2.COLOR_RGB2BGR)
     with engine_lock:
@@ -234,7 +237,7 @@ def upload(eid):
     name = (secure_filename(photo.filename) or "photo.jpg")[-180:]
     path = DATA / pid
     try:
-        with Image.open(photo.stream) as original:
+        with upload_lock, Image.open(photo.stream) as original:
             if original.format not in PHOTO_FORMATS:
                 abort(415, f"{original.format} images are unsupported. Use JPG, MPO, PNG, WebP, HEIC, AVIF, TIFF, BMP or GIF.")
             _, extensions = PHOTO_FORMATS[original.format]
@@ -244,6 +247,8 @@ def upload(eid):
             is_mpo = original.format == "MPO"
             if is_mpo:
                 original.seek(0)
+                original.draft("RGB", (4096, 4096))
+                original.thumbnail((4096, 4096))
                 ImageOps.exif_transpose(original, in_place=True)
                 # Only distribute the primary image. Other MPO frames are not face-indexed.
                 original.save(path, "JPEG", quality=95)

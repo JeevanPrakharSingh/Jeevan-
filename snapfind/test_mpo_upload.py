@@ -10,10 +10,11 @@ def test_mpo_upload():
         os.environ.update(SNAPFIND_DATA=data, ADMIN_PASSWORD="local-test-only")
         from app import DATA, app, db
 
-        primary = Image.new("RGB", (320, 220), "red")
+        primary = Image.new("RGB", (6000, 4000), "red")
         extra = Image.new("RGB", (320, 220), "blue")
         fixture = io.BytesIO()
         primary.save(fixture, format="MPO", save_all=True, append_images=[extra])
+        del primary, extra
         raw = fixture.getvalue()
         with Image.open(io.BytesIO(raw)) as original:
             assert original.format == "MPO" and original.n_frames == 2
@@ -33,7 +34,7 @@ def test_mpo_upload():
             assert photo["name"] == "DSC_5558.JPG"
         with Image.open(DATA / photo["id"]) as saved:
             assert saved.format == "JPEG" and getattr(saved, "n_frames", 1) == 1
-            assert saved.size == primary.size
+            assert saved.width == 4096 and 2700 < saved.height < 2750
             red, _, blue = saved.getpixel((160, 110))
             assert red > 240 and blue < 15
         print("MPO regression passed: camera .JPG indexed, primary JPEG stored, duplicate skipped", flush=True)

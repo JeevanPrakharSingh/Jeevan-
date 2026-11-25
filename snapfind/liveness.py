@@ -2,7 +2,6 @@ import io
 import threading
 from pathlib import Path
 
-import mediapipe as mp
 import numpy as np
 from PIL import Image
 
@@ -16,6 +15,8 @@ _detector = None
 
 
 def blink_states(frames):
+    import mediapipe as mp
+
     global _detector
     with _lock:
         if _detector is None:
