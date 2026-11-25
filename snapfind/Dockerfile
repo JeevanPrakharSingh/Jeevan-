@@ -7,6 +7,8 @@ COPY app.py liveness.py setup_models.py ./
 COPY templates templates
 COPY static static
 RUN python setup_models.py && useradd --system snapfind && mkdir /data && chown snapfind /data
+RUN --mount=type=bind,source=test_mpo_upload.py,target=/app/test_mpo_upload.py \
+    OPENBLAS_NUM_THREADS=1 python test_mpo_upload.py
 ENV SNAPFIND_DATA=/data PORT=8080
 USER snapfind
 EXPOSE 8080

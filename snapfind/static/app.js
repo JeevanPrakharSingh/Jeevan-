@@ -298,7 +298,7 @@ el("copyLink").addEventListener("click", async () => {
 });
 
 ["folder", "files"].forEach((id) => el(id).addEventListener("change", (event) => {
-  selected = Array.from(event.target.files).filter((file) => file.type.startsWith("image/") || /\.(jpe?g|jfif|png|webp|hei[cf]|avif|tiff?|bmp|gif)$/i.test(file.name));
+  selected = Array.from(event.target.files).filter((file) => file.type.startsWith("image/") || /\.(jpe?g|jfif|mpo|png|webp|hei[cf]|avif|tiff?|bmp|gif)$/i.test(file.name));
   const bytes = selected.reduce((total, file) => total + file.size, 0);
   const size = bytes >= 1e9 ? (bytes / 1e9).toFixed(2) + " GB" : (bytes / 1e6).toFixed(1) + " MB";
   el("selection").textContent = selected.length ? selected.length + " photos · " + size : "No supported photos selected.";

@@ -31,6 +31,7 @@ MODELS = [BASE / "models" / name for name in (
 LIMIT = 50 * 1024 * 1024
 PHOTO_FORMATS = {
     "JPEG": ("image/jpeg", (".jpg", ".jpeg", ".jfif")),
+    "MPO": ("image/jpeg", (".jpg", ".jpeg")),
     "PNG": ("image/png", (".png",)),
     "WEBP": ("image/webp", (".webp",)),
     "HEIF": ("image/heif", (".heic", ".heif")),
@@ -235,14 +236,25 @@ def upload(eid):
     try:
         with Image.open(photo.stream) as original:
             if original.format not in PHOTO_FORMATS:
-                abort(415, f"{original.format} images are unsupported. Use JPG, PNG, WebP, HEIC, AVIF, TIFF, BMP or GIF.")
+                abort(415, f"{original.format} images are unsupported. Use JPG, MPO, PNG, WebP, HEIC, AVIF, TIFF, BMP or GIF.")
             _, extensions = PHOTO_FORMATS[original.format]
             suffix = Path(name).suffix.lower()
             if suffix not in extensions:
                 name = (Path(name).stem or "photo") + extensions[0]
-            vectors = index_image(original)
-        photo.stream.seek(0)
-        photo.save(path)
+            is_mpo = original.format == "MPO"
+            if is_mpo:
+                original.seek(0)
+                ImageOps.exif_transpose(original, in_place=True)
+                # Only distribute the primary image. Other MPO frames are not face-indexed.
+                original.save(path, "JPEG", quality=95)
+            else:
+                vectors = index_image(original)
+        if is_mpo:
+            with Image.open(path) as primary:
+                vectors = index_image(primary)
+        else:
+            photo.stream.seek(0)
+            photo.save(path)
         with db() as conn:
             inserted = conn.execute("INSERT OR IGNORE INTO uploads VALUES (?,?,?)", (eid, fingerprint, pid))
             if not inserted.rowcount:
