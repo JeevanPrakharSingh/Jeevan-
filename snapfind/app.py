@@ -114,10 +114,11 @@ def extract(stream):
         return index_image(original)
 
 
-def index_image(original):
+def index_image(original, album=False):
     global engine
-    original.draft("RGB", (1024, 1024))
-    original.thumbnail((1024, 1024))
+    limit = 1600 if album else 1024
+    original.draft("RGB", (limit, limit))
+    original.thumbnail((limit, limit))
     ImageOps.exif_transpose(original, in_place=True)
     pixels = cv2.cvtColor(np.asarray(original.convert("RGB")), cv2.COLOR_RGB2BGR)
     with engine_lock:
@@ -126,8 +127,7 @@ def index_image(original):
             recognizer = cv2.FaceRecognizerSF.create(str(MODELS[1]), "")
             engine = detector, recognizer
         detector, recognizer = engine
-        detector.setInputSize((pixels.shape[1], pixels.shape[0]))
-        _, faces = detector.detect(pixels)
+        faces = detect_faces(detector, pixels, album)
         result = []
         if faces is not None:
             for face in faces:
@@ -140,6 +140,41 @@ def index_image(original):
                 pose = (float(face[8]) - sum(eyes) / 2) / max(eyes[1] - eyes[0], 1)
                 result.append((vector, pose))
         return result
+
+
+def detect_faces(detector, pixels, album):
+    height, width = pixels.shape[:2]
+    scale = min(1.0, 1024 / max(width, height))
+    overview = cv2.resize(pixels, None, fx=scale, fy=scale) if scale < 1 else pixels
+    detector.setInputSize((overview.shape[1], overview.shape[0]))
+    _, detected = detector.detect(overview)
+    faces = []
+    if detected is not None:
+        for face in detected:
+            face[:14] /= scale
+            faces.append(face)
+    if not album or scale == 1:
+        return faces
+
+    # Overlap crops so a face at the center seam is still seen at full scale.
+    crop_width, crop_height = min(width, 960), min(height, 960)
+    for y in sorted({0, height - crop_height}):
+        for x in sorted({0, width - crop_width}):
+            crop = pixels[y:y + crop_height, x:x + crop_width]
+            detector.setInputSize((crop_width, crop_height))
+            _, detected = detector.detect(crop)
+            if detected is not None:
+                for face in detected:
+                    face[0] += x
+                    face[1] += y
+                    face[4:14:2] += x
+                    face[5:14:2] += y
+                    faces.append(face)
+    if not faces:
+        return []
+    keep = cv2.dnn.NMSBoxes([list(map(float, face[:4])) for face in faces],
+                            [float(face[-1]) for face in faces], 0.0, 0.35)
+    return [faces[index] for index in np.asarray(keep).flatten()]
 
 
 def ready():
@@ -256,10 +291,10 @@ def upload(eid):
                 # Only distribute the primary image. Other MPO frames are not face-indexed.
                 original.save(path, "JPEG", quality=95)
             else:
-                vectors = index_image(original)
+                vectors = index_image(original, album=True)
         if is_mpo:
             with Image.open(path) as primary:
-                vectors = index_image(primary)
+                vectors = index_image(primary, album=True)
         else:
             photo.stream.seek(0)
             photo.save(path)
@@ -357,13 +392,17 @@ def search(eid):
         abort(400, "Camera session expired. Start the camera again.")
     token = secrets.token_urlsafe(32)
     found = {}
+    # Normalize the average so camera-frame noise does not dominate the comparison.
+    combined = before + after
+    combined /= max(float(np.linalg.norm(combined)), 1e-8)
     with db() as conn:
         rows = conn.execute("""SELECT p.id,p.name,f.embedding FROM photos p
                                JOIN faces f ON p.id=f.photo WHERE p.event=?""", (eid,))
         for row in rows:
             vector = np.frombuffer(row["embedding"], dtype="float32")
             scores = (np.dot(before, vector), np.dot(after, vector))
-            if (max(scores) >= 0.62 and min(scores) >= 0.48) or min(scores) >= 0.56:
+            if ((max(scores) >= 0.62 and min(scores) >= 0.48) or min(scores) >= 0.56
+                    or (min(scores) >= 0.49 and np.dot(combined, vector) >= 0.57)):
                 found[row["id"]] = row["name"]
         conn.execute("DELETE FROM grants WHERE token IN (SELECT token FROM tickets WHERE expires<=?)", (now,))
         conn.execute("DELETE FROM tickets WHERE expires<=?", (now,))
