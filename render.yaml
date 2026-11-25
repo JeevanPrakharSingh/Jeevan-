@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: snapfind-ai-test
+    runtime: docker
+    plan: free
+    rootDir: snapfind
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SNAPFIND_HTTPS
+        value: "1"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"

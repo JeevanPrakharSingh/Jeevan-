@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>SnapFind AI · Event photo gallery</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body data-event="{{ event }}" data-admin="{{ 'yes' if admin else 'no' }}">
+<header><a class="brand" href="/"><span aria-hidden="true">◎</span> SnapFind<span class="accent"> AI</span></a><button type="button" id="switch" class="secondary">Organizer dashboard</button></header>
+<main>
+<section id="guest">
+  <div class="hero">
+    <div class="intro"><span class="eyebrow">EVENT PHOTO GALLERY</span><h1>Find your<br>event photos.</h1><p>Take a live selfie to find your photos, then download your favorites or save every match in one ZIP.</p><p class="event-label" id="eventName" role="status">Open the event link from your organizer.</p></div>
+    <div class="card camera-card">
+      <h2>Live selfie</h2>
+      <div class="camera"><div id="frame"><div class="oval" aria-hidden="true"></div><span>Center your face in the frame</span></div><video id="video" autoplay playsinline muted hidden></video></div>
+      <label class="consent"><input id="consent" type="checkbox"><span>I agree to use my live selfie to find my photos from this event.</span></label>
+      <button id="openCamera" disabled>Open front camera</button><button id="capture" hidden disabled>Capture front view</button><button id="cancelCamera" class="secondary" hidden>Cancel</button>
+      <p id="status" class="status" role="status"></p>
+    </div>
+  </div>
+  <section id="results" class="results" hidden>
+    <h2 id="count"></h2>
+    <form id="zip" method="post">
+      <div class="actions" id="downloadActions">
+        <button name="scope" value="all">Download all as ZIP</button>
+        <button class="secondary" name="scope" value="selected">Download selected</button>
+      </div>
+      <div id="gallery" class="gallery"></div>
+    </form>
+  </section>
+</section>
+<section id="organizer" hidden>
+  <div class="dashboard-heading"><span class="eyebrow">ORGANIZER</span><h1>Event dashboard</h1></div>
+  <form id="login" class="card stack">
+    <h2>Organizer sign-in</h2>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button>Sign in</button>
+  </form>
+  <div id="manage" class="manage" hidden>
+    <div class="card stack">
+      <h2>Events</h2>
+      <form id="create" class="stack">
+        <label for="ename">New event name</label>
+        <input id="ename" maxlength="120" placeholder="e.g. Annual celebration" required>
+        <button>Create event</button>
+      </form>
+      <label for="events">Saved events</label><select id="events"><option value="">Select an event</option></select>
+      <div id="share" class="stack" hidden>
+        <label for="link">Guest link</label><input id="link" readonly>
+        <button type="button" id="copyLink" class="secondary">Copy guest link</button>
+      </div>
+    </div>
+    <div class="card stack">
+      <h2>Upload event photos</h2>
+      <p>Choose a folder or select multiple JPG, PNG or WebP photos. Up to 50 MiB per photo.</p>
+      <div class="actions"><label class="picker">Choose folder<input id="folder" type="file" webkitdirectory multiple></label><label class="picker">Choose photos<input id="files" type="file" accept="image/jpeg,image/png,image/webp" multiple></label></div>
+      <p id="selection">Choose photos to get started.</p>
+      <button id="upload" disabled>Upload and index photos</button>
+      <progress id="progress" max="100" value="0" aria-label="Upload progress"></progress>
+      <p id="uploadStatus" role="status"></p><ul id="failures" hidden></ul>
+    </div>
+  </div>
+  <p id="adminStatus" class="status" role="status"></p>
+</section>
+</main>
+</body>
+</html>
