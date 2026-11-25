@@ -420,7 +420,7 @@ def archive(token):
             for row in rows:
                 output.write(DATA / row["id"], row["id"] + "_" + row["name"])
         temp.seek(0)
-        return send_file(temp, download_name="SnapFind-photos.zip", as_attachment=True, mimetype="application/zip")
+        return send_file(temp, download_name="Capture-View-photos.zip", as_attachment=True, mimetype="application/zip")
     except Exception:
         temp.close()
         raise
