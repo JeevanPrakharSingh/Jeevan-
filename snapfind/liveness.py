@@ -6,8 +6,8 @@ import numpy as np
 from PIL import Image
 
 MODEL = Path(__file__).resolve().parent / "models" / "face_landmarker.task"
-FRAME_COUNT = 64
-FRAME_INTERVAL_MS = 67
+FRAME_COUNT = 20
+FRAME_INTERVAL_MS = 55
 MAX_FRAME_BYTES = 60_000
 LIVENESS_ERROR = "Live selfie could not be verified. Do not show a photo or another phone to the camera. Look directly at the camera and blink when prompted."
 _lock = threading.Lock()
@@ -44,24 +44,16 @@ def blink_states(frames):
                 yield "transition"
 
 
-def confirmed_blinks(states, expected):
-    if (states.count("missing") > 3 or
-            states[:10].count("open") < 4 or states[-10:].count("open") < 4):
-        return []
-    closed_frames = []
-    opened = False
-    last_closed = None
+def confirmed_blink(states):
+    before = closed = None
     for index, state in enumerate(states):
         if state == "missing":
-            opened = False
-            last_closed = None
+            before = closed = None
         elif state == "open":
-            if opened and last_closed is not None:
-                closed_frames.append(last_closed)
-            last_closed = None
-            opened = True
-        elif state == "closed" and opened and last_closed is None:
-            last_closed = index
-    if len(closed_frames) != expected or any(i < 10 or i >= FRAME_COUNT - 7 for i in closed_frames):
-        return []
-    return closed_frames
+            if before is not None and closed is not None and index - closed <= 9:
+                return before, closed, index
+            before, closed = index, None
+        elif state == "closed" and before is not None and closed is None:
+            if index - before <= 7:
+                closed = index
+    return None

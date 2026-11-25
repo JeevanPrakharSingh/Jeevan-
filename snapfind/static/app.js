@@ -7,9 +7,6 @@ let organizerSignedIn = document.body.dataset.admin === "yes";
 let eventReady = false;
 let stream;
 let cameraRun = 0;
-let challenge;
-let frames = [];
-let blinkFrames = [];
 let active = "";
 let selected = [];
 let uploading = false;
@@ -53,13 +50,9 @@ function stopCamera() {
   el("video").srcObject = null;
   el("video").hidden = true;
   el("frame").hidden = false;
-  el("capture").hidden = true;
   el("openCamera").hidden = false;
   el("openCamera").disabled = !eventReady;
   el("cancelCamera").hidden = true;
-  challenge = null;
-  frames = [];
-  blinkFrames = [];
 }
 
 el("openCamera").addEventListener("click", async () => {
@@ -91,14 +84,11 @@ el("openCamera").addEventListener("click", async () => {
     if (run !== cameraRun) return;
     const ticket = await api(eventPath(eid) + "/challenge", {method:"POST"});
     if (run !== cameraRun) return;
-    challenge = ticket;
     view.hidden = false;
     el("frame").hidden = true;
     el("openCamera").hidden = true;
-    el("capture").hidden = false;
-    el("capture").disabled = false;
-    el("capture").textContent = "Capture front view";
-    el("status").textContent = "Look straight into the camera.";
+    el("status").textContent = "Look at the camera and blink once.";
+    await watchForBlink(run, ticket);
   } catch (error) {
     if (run !== cameraRun) return;
     stopCamera();
@@ -131,65 +121,43 @@ function frameFromCamera(maxSize = 960, quality = 0.9) {
   }, "image/jpeg", quality));
 }
 
-async function recordBlinks(run) {
-  const {frames: count, interval, blinks} = challenge;
-  const captured = [];
-  el("status").textContent = "Look straight and keep your eyes open. Wait for the blink prompt.";
-  const started = performance.now();
-  for (let index = 0; index < count; index++) {
-    const wait = Math.max(0, started + index * interval - performance.now());
-    await new Promise((resolve) => setTimeout(resolve, wait));
-    if (run !== cameraRun) return null;
-    if (index === 12) el("status").textContent = blinks === 1 ? "Blink once now." : "Blink twice now.";
-    if (index === count - 12) el("status").textContent = "Keep your eyes open and look straight.";
-    captured.push(await frameFromCamera(400, 0.7));
-  }
-  return captured;
-}
-
-el("capture").addEventListener("click", async () => {
-  const run = cameraRun;
-  el("capture").disabled = true;
-  try {
-    const frame = await frameFromCamera();
+async function watchForBlink(run, ticket) {
+  const buffer = [];
+  const deadline = performance.now() + 24000;
+  let pending = null;
+  let nextSample = performance.now();
+  let lastSend = -Infinity;
+  while (run === cameraRun && performance.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, nextSample - performance.now())));
     if (run !== cameraRun) return;
-    frames.push(frame);
-    if (frames.length === 1) {
-      blinkFrames = await recordBlinks(run);
-      if (run !== cameraRun) return;
-      el("status").textContent = "Keep your device still. Turn your head to your " + challenge.direction + ".";
-      el("capture").textContent = "Capture turned view";
-    } else if (frames.length === 2) {
-      el("status").textContent = "Look straight into the camera again.";
-      el("capture").textContent = "Capture selfie and find photos";
-    } else {
-      const data = new FormData();
-      ["front", "turn", "return"].forEach((name, index) => data.append(name, frames[index], name + ".jpg"));
-      blinkFrames.forEach((frame) => data.append("blink", frame, "blink.jpg"));
-      data.append("consent", el("consent").checked ? "yes" : "no");
-      data.append("challenge", challenge.challenge);
-      stopCamera();
-      const searchRun = cameraRun;
-      el("openCamera").disabled = true;
-      el("status").textContent = "Finding photos from this event…";
-      try {
-        const result = await api(eventPath(eid) + "/search", {method:"POST", body:data});
-        if (searchRun === cameraRun) renderResults(result);
-      } catch (error) {
-        if (searchRun === cameraRun) el("status").textContent = error.message;
-      } finally {
-        if (searchRun === cameraRun) el("openCamera").disabled = !eventReady;
+    nextSample = performance.now() + ticket.interval;
+    buffer.push(await frameFromCamera(400, 0.72));
+    if (buffer.length > ticket.frames) buffer.shift();
+    if (pending?.done) {
+      const {result, error} = pending;
+      pending = null;
+      if (error) throw error;
+      if (!result.waiting) {
+        stopCamera();
+        renderResults(result);
+        return;
       }
     }
-  } catch (error) {
-    if (run === cameraRun) {
-      stopCamera();
-      el("status").textContent = error.message;
-    }
-  } finally {
-    if (run === cameraRun) el("capture").disabled = false;
+    if (pending || buffer.length !== ticket.frames || performance.now() - lastSend < 850) continue;
+    const body = new FormData();
+    buffer.forEach(frame => body.append("blink", frame, "blink.jpg"));
+    body.append("consent", el("consent").checked ? "yes" : "no");
+    body.append("challenge", ticket.challenge);
+    lastSend = performance.now();
+    const attempt = {done:false};
+    pending = attempt;
+    api(eventPath(eid) + "/search", {method:"POST", body})
+      .then(result => { attempt.result = result; }, error => { attempt.error = error; })
+      .finally(() => { attempt.done = true; });
   }
-});
+  if (run !== cameraRun) return;
+  throw new Error("No blink was verified. Start the camera again and blink once with your face centered in good light.");
+}
 
 function renderResults(result) {
   el("gallery").replaceChildren();

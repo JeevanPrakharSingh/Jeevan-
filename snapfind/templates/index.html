@@ -6,7 +6,7 @@
 <meta name="referrer" content="no-referrer">
 <title>SnapFind AI · Event photo gallery</title>
 <link rel="stylesheet" href="/static/app.css">
-<script src="/static/app.js?v=mobile-upload" defer></script>
+<script src="/static/app.js?v=blink-once" defer></script>
 </head>
 <body data-event="{{ event }}" data-admin="{{ 'yes' if admin else 'no' }}">
 <header><a class="brand" href="/"><span aria-hidden="true">◎</span> SnapFind<span class="accent"> AI</span></a><button type="button" id="switch" class="secondary">Organizer dashboard</button></header>
@@ -18,7 +18,7 @@
       <h2>Live selfie</h2>
       <div class="camera"><div id="frame"><div class="oval" aria-hidden="true"></div><span>Center your face in the frame</span></div><video id="video" autoplay playsinline muted hidden></video></div>
       <label class="consent"><input id="consent" type="checkbox"><span>I agree to use my live selfie to find my photos from this event.</span></label>
-      <button id="openCamera" disabled>Open front camera</button><button id="capture" hidden disabled>Capture front view</button><button id="cancelCamera" class="secondary" hidden>Cancel</button>
+      <button id="openCamera" disabled>Open front camera</button><button id="cancelCamera" class="secondary" hidden>Cancel</button>
       <p id="status" class="status" role="status"></p>
     </div>
   </div>

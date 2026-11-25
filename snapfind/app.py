@@ -20,7 +20,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 from liveness import (FRAME_COUNT, FRAME_INTERVAL_MS, LIVENESS_ERROR, MAX_FRAME_BYTES,
-                      MODEL as LIVENESS_MODEL, blink_states, confirmed_blinks)
+                      MODEL as LIVENESS_MODEL, blink_states, confirmed_blink)
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("SNAPFIND_DATA", BASE / "data")).resolve()
@@ -294,15 +294,20 @@ def challenge(eid):
         abort(409, "The organizer hasn't uploaded photos yet.")
     if limited("camera:" + (request.remote_addr or ""), 30, 300):
         abort(429, "Too many camera attempts. Try again in a few minutes.")
+    with db() as conn:
+        indexed = conn.execute(
+            "SELECT 1 FROM photos JOIN faces ON faces.photo=photos.id WHERE photos.event=? LIMIT 1", (eid,)
+        ).fetchone()
+    if not indexed:
+        abort(409, "Photos were uploaded, but none contain an indexed face. Ask the organizer to upload clear portraits.")
     guest = session.setdefault("guest", secrets.token_urlsafe(24))
     ticket = secrets.token_urlsafe(24)
-    direction = secrets.choice([-2, -1, 1, 2])
+
     now = int(time.time())
     with db() as conn:
         conn.execute("DELETE FROM challenges WHERE expires<=? OR guest=?", (now, guest))
-        conn.execute("INSERT INTO challenges VALUES (?,?,?,?,?)", (ticket, eid, guest, direction, now + 120))
-    return jsonify(challenge=ticket, direction="left" if direction > 0 else "right",
-                   blinks=abs(direction), frames=FRAME_COUNT, interval=FRAME_INTERVAL_MS)
+        conn.execute("INSERT INTO challenges VALUES (?,?,?,?,?)", (ticket, eid, guest, 0, now + 120))
+    return jsonify(challenge=ticket, frames=FRAME_COUNT, interval=FRAME_INTERVAL_MS)
 
 
 @app.post("/events/<eid>/search")
@@ -312,52 +317,44 @@ def search(eid):
     ready()
     if request.form.get("consent") != "yes":
         abort(400, "Confirm consent before searching.")
-    now = int(time.time())
+    ticket = request.form.get("challenge")
+    guest = session.get("guest")
     with db() as conn:
-        challenge_row = conn.execute(
-            "DELETE FROM challenges WHERE id=? AND event=? AND guest=? AND expires>? RETURNING direction, expires",
-            (request.form.get("challenge"), eid, session.get("guest"), now),
+        active = conn.execute(
+            "SELECT 1 FROM challenges WHERE id=? AND event=? AND guest=? AND expires>?",
+            (ticket, eid, guest, int(time.time())),
         ).fetchone()
-    if not challenge_row:
+    if not active:
         abort(400, "Camera session expired. Start the camera again.")
-    if now - (challenge_row["expires"] - 120) < 4:
-        abort(422, LIVENESS_ERROR)
-    frames = [request.files.get(name) for name in ("front", "turn", "return")]
-    if any(frame is None for frame in frames):
-        abort(422, LIVENESS_ERROR)
-    try:
-        samples = [extract(frame.stream) for frame in frames]
-    except (OSError, ValueError, cv2.error, Image.DecompressionBombError):
-        abort(422, LIVENESS_ERROR)
-    if any(len(sample) != 1 for sample in samples):
-        abort(422, LIVENESS_ERROR)
-    (query, front), (turned, side), (returned, center) = [sample[0] for sample in samples]
-    if (abs(front) > 0.24 or abs(center) > 0.24 or
-            (side - front) * np.sign(challenge_row["direction"]) < 0.16 or abs(center - front) > 0.16 or
-            np.dot(query, turned) < 0.40 or np.dot(query, returned) < 0.55):
-        abort(422, LIVENESS_ERROR)
+    if limited("blink:" + ticket, 20, 120):
+        abort(429, "No blink was verified. Restart the camera and try again.")
     burst = request.files.getlist("blink")
     if len(burst) != FRAME_COUNT or not LIVENESS_MODEL.is_file():
         abort(422, LIVENESS_ERROR)
-    compressed = [item.stream.read(MAX_FRAME_BYTES + 1) for item in burst]
-    if any(not frame or len(frame) > MAX_FRAME_BYTES for frame in compressed):
+    frames = [item.stream.read(MAX_FRAME_BYTES + 1) for item in burst]
+    if any(not frame or len(frame) > MAX_FRAME_BYTES for frame in frames):
         abort(422, LIVENESS_ERROR)
     try:
-        states = list(blink_states(compressed))
-        blink_indices = confirmed_blinks(states, abs(challenge_row["direction"]))
-        if not blink_indices:
-            abort(422, LIVENESS_ERROR)
-        # Bind the person blinking to both front-facing frames used for the search.
-        checkpoints = [states.index("open"), *blink_indices,
-                       len(states) - 1 - states[::-1].index("open")]
-        for index in checkpoints:
-            sample = extract(io.BytesIO(compressed[index]))
-            if len(sample) != 1 or min(np.dot(query, sample[0][0]),
-                                       np.dot(returned, sample[0][0])) < 0.55:
-                abort(422, LIVENESS_ERROR)
+        indices = confirmed_blink(blink_states(frames))
+        if indices is None:
+            return jsonify(waiting=True)
+        samples = [extract(io.BytesIO(frames[index])) for index in indices]
+        if any(len(sample) != 1 for sample in samples):
+            return jsonify(waiting=True)
+        before, closed, after = [sample[0][0] for sample in samples]
+        if min(np.dot(before, closed), np.dot(closed, after)) < 0.45 or np.dot(before, after) < 0.58:
+            return jsonify(waiting=True)
     except (OSError, ValueError, RuntimeError, cv2.error, Image.DecompressionBombError):
         app.logger.exception("Liveness frames could not be verified")
         abort(422, LIVENESS_ERROR)
+    now = int(time.time())
+    with db() as conn:
+        used = conn.execute(
+            "DELETE FROM challenges WHERE id=? AND event=? AND guest=? AND expires>? RETURNING id",
+            (ticket, eid, guest, now),
+        ).fetchone()
+    if not used:
+        abort(400, "Camera session expired. Start the camera again.")
     token = secrets.token_urlsafe(32)
     found = {}
     with db() as conn:
@@ -365,7 +362,8 @@ def search(eid):
                                JOIN faces f ON p.id=f.photo WHERE p.event=?""", (eid,))
         for row in rows:
             vector = np.frombuffer(row["embedding"], dtype="float32")
-            if min(np.dot(query, vector), np.dot(returned, vector)) >= 0.62:
+            scores = (np.dot(before, vector), np.dot(after, vector))
+            if min(scores) >= 0.52 and sum(scores) / 2 >= 0.58:
                 found[row["id"]] = row["name"]
         conn.execute("DELETE FROM grants WHERE token IN (SELECT token FROM tickets WHERE expires<=?)", (now,))
         conn.execute("DELETE FROM tickets WHERE expires<=?", (now,))
