@@ -117,13 +117,14 @@ def extract(stream):
 def index_image(original, album=False):
     global engine
     limit = 1600 if album else 1024
-    original.draft("RGB", (limit, limit))
+    scale = min(1.0, limit / max(original.size))
+    original.draft("RGB", tuple(max(1, round(dimension * scale)) for dimension in original.size))
     original.thumbnail((limit, limit))
     ImageOps.exif_transpose(original, in_place=True)
     pixels = cv2.cvtColor(np.asarray(original.convert("RGB")), cv2.COLOR_RGB2BGR)
     with engine_lock:
         if engine is None:
-            detector = cv2.FaceDetectorYN.create(str(MODELS[0]), "", (320, 320), 0.84, 0.3, 5000)
+            detector = cv2.FaceDetectorYN.create(str(MODELS[0]), "", (DETECTOR_SIZE, DETECTOR_SIZE), 0.84, 0.3, 5000)
             recognizer = cv2.FaceRecognizerSF.create(str(MODELS[1]), "")
             engine = detector, recognizer
         detector, recognizer = engine
@@ -142,34 +143,44 @@ def index_image(original, album=False):
         return result
 
 
+DETECTOR_SIZE = 800
+
+
+def detect_window(detector, window, buffer):
+    height, width = window.shape[:2]
+    buffer.fill(0)
+    buffer[:height, :width] = window
+    _, detected = detector.detect(buffer)
+    if detected is None:
+        return []
+    return [face for face in detected
+            if 0 <= face[0] + face[2] / 2 < width and 0 <= face[1] + face[3] / 2 < height]
+
+
 def detect_faces(detector, pixels, album):
     height, width = pixels.shape[:2]
-    scale = min(1.0, 1024 / max(width, height))
+    scale = min(1.0, DETECTOR_SIZE / max(width, height))
     overview = cv2.resize(pixels, None, fx=scale, fy=scale) if scale < 1 else pixels
-    detector.setInputSize((overview.shape[1], overview.shape[0]))
-    _, detected = detector.detect(overview)
-    faces = []
-    if detected is not None:
-        for face in detected:
-            face[:14] /= scale
-            faces.append(face)
+    buffer = np.empty((DETECTOR_SIZE, DETECTOR_SIZE, 3), dtype=np.uint8)
+    faces = detect_window(detector, overview, buffer)
+    for face in faces:
+        face[:14] /= scale
     if not album or scale == 1:
         return faces
 
-    # Overlap crops so a face at the center seam is still seen at full scale.
-    crop_width, crop_height = min(width, 960), min(height, 960)
-    for y in sorted({0, height - crop_height}):
-        for x in sorted({0, width - crop_width}):
+    crop_width, crop_height = min(width, DETECTOR_SIZE), min(height, DETECTOR_SIZE)
+    # Center windows overlap both edge windows so seam faces are not clipped.
+    ys = sorted({0, (height - crop_height) // 2, height - crop_height})
+    xs = sorted({0, (width - crop_width) // 2, width - crop_width})
+    for y in ys:
+        for x in xs:
             crop = pixels[y:y + crop_height, x:x + crop_width]
-            detector.setInputSize((crop_width, crop_height))
-            _, detected = detector.detect(crop)
-            if detected is not None:
-                for face in detected:
-                    face[0] += x
-                    face[1] += y
-                    face[4:14:2] += x
-                    face[5:14:2] += y
-                    faces.append(face)
+            for face in detect_window(detector, crop, buffer):
+                face[0] += x
+                face[1] += y
+                face[4:14:2] += x
+                face[5:14:2] += y
+                faces.append(face)
     if not faces:
         return []
     keep = cv2.dnn.NMSBoxes([list(map(float, face[:4])) for face in faces],
